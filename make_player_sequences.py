@@ -8,19 +8,16 @@ from typing import List, Dict, Tuple
 import torch
 from torch.utils.data import Dataset
 
-# -------------------------
+
 # Config
-# -------------------------
-YEARS = list(range(2017, 2025))           # adjust
-SEQ_LEN = 10                               # weeks of history per sample
-MIN_WEEKS = 3                              # require at least this much past data
-KEEP_POS = {"QB","RB","WR","TE"}          # fantasy positions to keep
+YEARS = list(range(2017, 2025))
+SEQ_LEN = 10
+MIN_WEEKS = 3
+KEEP_POS = {"QB","RB","WR","TE"}
 OUT_DIR = "data/processed"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-# -------------------------
-# 1) Load & normalize
-# -------------------------
+# Load & normalize
 weekly = nfl.import_weekly_data(YEARS)
 rosters = nfl.import_seasonal_rosters(YEARS)
 ids_x = nfl.import_ids()
@@ -31,37 +28,36 @@ team_cols = [c for c in ["team","recent_team","team_abbr"] if c in rosters.colum
 team_col = team_cols[0] if team_cols else None
 
 ro_map_cols = ["player_id"]
-if name_col: ro_map_cols.append(name_col)
-if team_col: ro_map_cols.append(team_col)
-if "position" in rosters.columns: ro_map_cols.append("position")
+if name_col: 
+    ro_map_cols.append(name_col)
+if team_col: 
+    ro_map_cols.append(team_col)
+if "position" in rosters.columns: 
+    ro_map_cols.append("position")
 
 ro_map = rosters[ro_map_cols].drop_duplicates("player_id").copy()
-if name_col: ro_map = ro_map.rename(columns={name_col:"player_name"})
-if team_col: ro_map = ro_map.rename(columns={team_col:"team"})
+if name_col: 
+    ro_map = ro_map.rename(columns={name_col:"player_name"})
+if team_col: 
+    ro_map = ro_map.rename(columns={team_col:"team"})
 
-# ensure standard fields exist in weekly
 if "recent_team" in weekly.columns and "team" not in weekly.columns:
     weekly = weekly.rename(columns={"recent_team":"team"})
 if "player_name" not in weekly.columns and "name" in weekly.columns:
     weekly = weekly.rename(columns={"name":"player_name"})
 
-# Keep only skill positions
+
 if "position" not in weekly.columns:
     weekly = weekly.merge(ro_map[["player_id","position"]], on="player_id", how="left")
 weekly = weekly[weekly["position"].isin(KEEP_POS)]
 
-# opponent column name harmonization
 opp_col = "opponent_team" if "opponent_team" in weekly.columns else ("opponent" if "opponent" in weekly.columns else None)
-if opp_col is None:
-    raise RuntimeError("Opponent column not found in weekly data.")
 
 weekly["season"] = weekly["season"].astype(int)
 weekly["week"]   = weekly["week"].astype(int)
 
-# -------------------------
-# 2) Basic feature tables
-# -------------------------
-# A) Player-week core stats (subset; add more later as needed)
+# Basic feature tables
+# Player-week core stats
 num_keep = [
     "passing_yards","passing_tds","interceptions",
     "rushing_yards","rushing_tds","carries",
@@ -71,7 +67,7 @@ for c in num_keep:
     if c not in weekly.columns:
         weekly[c] = np.nan
 
-# fantasy points (PPR) if available, else compute basic PPR
+# PPR points else compute PPR
 if "fantasy_points_ppr" not in weekly.columns:
     weekly["fantasy_points_ppr"] = (
         weekly["receptions"].fillna(0)
@@ -81,14 +77,13 @@ if "fantasy_points_ppr" not in weekly.columns:
         + 6*(weekly["rushing_tds"].fillna(0) + weekly["receiving_tds"].fillna(0))
         + 4*weekly["passing_tds"].fillna(0)
         - 2*weekly["interceptions"].fillna(0)
-        # ignoring fumbles lost / bonuses for simplicity
     )
 
-# attach canonical name/position/team from roster map
+
 weekly = weekly.merge(ro_map[["player_id","player_name","position","team"]], on="player_id", how="left", suffixes=("","_ro"))
 weekly["team"] = weekly["team"].fillna(weekly.get("team_ro"))
 
-# B) Team-week context: pass rate
+# Team-week context: pass rate
 agg = weekly.groupby(["season","week","team"], as_index=False).agg(
     pass_att=("attempts","sum") if "attempts" in weekly.columns else ("passing_yards","count"),
     rush_att=("carries","sum"),
@@ -97,23 +92,19 @@ agg["plays"] = agg["pass_att"] + agg["rush_att"]
 agg["pass_rate"] = agg["pass_att"] / agg["plays"].replace(0,np.nan)
 team_week = agg[["season","week","team","pass_rate"]]
 
-# C) Defense-vs-position (fantasy points allowed in that week)
+# Defense-vs-position (fantasy points allowed in that week)
 dvp = (weekly.groupby(["season","week",opp_col,"position"], as_index=False)
               .agg(fp_allowed=("fantasy_points_ppr","sum")))
 dvp_wide = dvp.pivot_table(index=["season","week",opp_col], columns="position", values="fp_allowed", fill_value=0).reset_index()
 dvp_wide.columns = ["season","week","team_def"] + [f"def_fp_allowed_{c}" for c in dvp_wide.columns[3:]]
 
-# -------------------------
-# 3) Join + rolling (leak-free)
-# -------------------------
+# Join + rolling (leak-free)
 X = (weekly.merge(team_week, on=["season","week","team"], how="left")
             .merge(dvp_wide, left_on=["season","week",opp_col],
                           right_on=["season","week","team_def"], how="left"))
 
-# Sort for rolling windows
 X = X.sort_values(["player_id","season","week"])
 
-# Rolling recency features (shift BEFORE rolling to avoid leakage)
 by_pid = X.groupby("player_id", group_keys=False)
 base_roll = ["fantasy_points_ppr","targets","carries","receptions","rushing_yards","receiving_yards"]
 for col in base_roll:
@@ -124,13 +115,11 @@ for col in base_roll:
 # Label: next-week PPR
 X["y_next_ppr"] = by_pid["fantasy_points_ppr"].shift(-1)
 
-# require some history
 X["hist_weeks"] = by_pid.cumcount()
 X = X[X["hist_weeks"] >= MIN_WEEKS]
 
-# -------------------------
-# 4) Categorical encoders
-# -------------------------
+
+# Categorical encoders
 def make_indexer(values: pd.Series) -> Dict[str,int]:
     uniq = ["<PAD>"] + sorted(set([str(v) for v in values.dropna().unique()]))
     return {v:i for i,v in enumerate(uniq)}
@@ -146,14 +135,13 @@ X["team_id"] = map_idx(X["team"], team_index)
 X["opp_id"]  = map_idx(X[opp_col], opp_index)
 X["pos_id"]  = map_idx(X["position"], pos_index)
 
-# -------------------------
-# 5) Select final feature set
-# -------------------------
+
+# Select final feature set
 num_feats = [
     # team/matchup
     "pass_rate",
     "def_fp_allowed_QB","def_fp_allowed_RB","def_fp_allowed_WR","def_fp_allowed_TE",
-    # recency
+    # recency at different levels
     "fantasy_points_ppr_lag1","fantasy_points_ppr_ma3","fantasy_points_ppr_ma5",
     "targets_lag1","targets_ma3","targets_ma5",
     "carries_lag1","carries_ma3","carries_ma5",
@@ -171,9 +159,7 @@ cat_feats = ["team_id","opp_id","pos_id"]
 keep_cols = ["season","week","player_id","player_name","position","team",opp_col,"y_next_ppr"] + num_feats + cat_feats
 X = X[keep_cols].reset_index(drop=True)
 
-# -------------------------
-# 6) Build sequences per (player_id, week)
-# -------------------------
+#Build sequences
 def build_sequences(df: pd.DataFrame, seq_len: int) -> Tuple[np.ndarray,np.ndarray,np.ndarray,pd.DataFrame]:
     """
     Returns:
@@ -188,13 +174,10 @@ def build_sequences(df: pd.DataFrame, seq_len: int) -> Tuple[np.ndarray,np.ndarr
         g = g.sort_values(["season","week"]).reset_index(drop=True)
         # slide over each week (use all but the last row that has label)
         for i in range(len(g)):
-            # stop if label missing
             if pd.isna(g.loc[i, "y_next_ppr"]): 
                 continue
-            # take up to seq_len rows ending at i (i inclusive)
             start = max(0, i - seq_len + 1)
             hist  = g.iloc[start:i+1]
-            # pad on the left if needed
             pad = seq_len - len(hist)
             num = hist[num_feats].to_numpy(dtype=np.float32)
             cat = hist[cat_feats].to_numpy(dtype=np.int64)
@@ -219,7 +202,6 @@ def build_sequences(df: pd.DataFrame, seq_len: int) -> Tuple[np.ndarray,np.ndarr
 
 X_num, X_cat, X_mask, META = build_sequences(X, SEQ_LEN)
 
-# standardize numeric features (fit on train later; here quick global z-score)
 mu = np.nanmean(X_num, axis=(0,1))
 sd = np.nanstd(X_num, axis=(0,1)) + 1e-6
 X_num = (np.nan_to_num(X_num, nan=0.0) - mu) / sd
@@ -228,9 +210,7 @@ X_cat = np.nan_to_num(X_cat, nan=0).astype(np.int64)
 # Targets
 y = META["y_next_ppr"].values.astype(np.float32)
 
-# -------------------------
-# 7) Train/Val split (leak-free by season)
-# -------------------------
+# Train/Val split
 VAL_SEASON = 2024
 train_idx = META["season"] < VAL_SEASON
 val_idx   = META["season"] == VAL_SEASON
@@ -243,7 +223,6 @@ np.savez_compressed(
 
 META.to_parquet(os.path.join(OUT_DIR, "meta.parquet"), index=False)
 
-# Save feature metadata (for model input sizes & embedding vocab)
 feat_meta = {
     "num_feats": num_feats,
     "cat_feats": cat_feats,
@@ -260,9 +239,7 @@ print("Saved:",
       os.path.join(OUT_DIR, "player_sequences_npz.npz"),
       os.path.join(OUT_DIR, "meta.parquet"))
 
-# -------------------------
-# 8) PyTorch Dataset (import from this file or copy to your training script)
-# -------------------------
+# PyTorch Dataset
 class PlayerWeekSequenceDataset(Dataset):
     def __init__(self, npz_path: str, split: str = "train"):
         data = np.load(npz_path, allow_pickle=True)
