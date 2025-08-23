@@ -4,7 +4,7 @@
 
 After running the preprocessing pipeline (make_player_sequences.py), the following artifacts are generated in data/processed/:
 
-# meta.parquet
+## meta.parquet
 
 A lightweight, human-readable index of training samples.
 Each row corresponds to one player-week sample (i.e., the state of a player up through Week k, with the label = fantasy points scored in Week k+1).
@@ -31,7 +31,7 @@ Each row corresponds to one player-week sample (i.e., the state of a player up t
 
 - It’s mainly for filtering/searching samples by player/team/week and joining predictions back to human-readable IDs.
 
-# player_sequences_npz.npz
+### player_sequences_npz.npz
 
 A compressed NumPy archive containing the actual model inputs and labels.
 This is what you load for training or evaluation.
@@ -64,7 +64,7 @@ This is what you load for training or evaluation.
 
     - Used to split samples into training vs. validation (by season).
 
-# Companion file: feature_meta.json
+### Companion file: feature_meta.json
 
 Stores metadata describing the NPZ arrays:
 
@@ -112,29 +112,18 @@ The core model is a custom **Transformer encoder** designed for sequence regress
 
 **Example Log**
 
-Epoch 01 | Train MAE: 7.876 | Val MAE: 6.439 | LR: 5.20e-05
-
-saved checkpoints/fantasy_transformer_best.pt (best_val=6.439)
-
-Epoch 02 | Train MAE: 5.537 | Val MAE: 4.975 | LR: 1.04e-04
-
-saved checkpoints/fantasy_transformer_best.pt (best_val=4.975)
-
-Epoch 03 | Train MAE: 5.066 | Val MAE: 5.008 | LR: 1.55e-04
-
-Epoch 04 | Train MAE: 5.037 | Val MAE: 4.983 | LR: 2.00e-04
-
-Epoch 05 | Train MAE: 5.014 | Val MAE: 4.979 | LR: 1.91e-04
-
-Epoch 06 | Train MAE: 4.990 | Val MAE: 4.966 | LR: 1.68e-04
-
-saved checkpoints/fantasy_transformer_best.pt (best_val=4.966)
-
-Epoch 07 | Train MAE: 4.969 | Val MAE: 4.942 | LR: 1.35e-04
-
-saved checkpoints/fantasy_transformer_best.pt (best_val=4.942)
-
-Epoch 08 | Train MAE: 4.938 | Val MAE: 4.948 | LR: 9.76e-05
+> Epoch 01 | Train MAE: 7.876 | Val MAE: 6.439 | LR: 5.20e-05
+> saved checkpoints/fantasy_transformer_best.pt (best_val=6.439)
+> Epoch 02 | Train MAE: 5.537 | Val MAE: 4.975 | LR: 1.04e-04
+> saved checkpoints/fantasy_transformer_best.pt (best_val=4.975)
+> Epoch 03 | Train MAE: 5.066 | Val MAE: 5.008 | LR: 1.55e-04
+> Epoch 04 | Train MAE: 5.037 | Val MAE: 4.983 | LR: 2.00e-04
+> Epoch 05 | Train MAE: 5.014 | Val MAE: 4.979 | LR: 1.91e-04
+> Epoch 06 | Train MAE: 4.990 | Val MAE: 4.966 | LR: 1.68e-04
+> saved checkpoints/fantasy_transformer_best.pt (best_val=4.966)
+> Epoch 07 | Train MAE: 4.969 | Val MAE: 4.942 | LR: 1.35e-04
+> saved checkpoints/fantasy_transformer_best.pt (best_val=4.942)
+> Epoch 08 | Train MAE: 4.938 | Val MAE: 4.948 | LR: 9.76e-05
 
 **Interpretation:**
 
