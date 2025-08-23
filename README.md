@@ -113,16 +113,27 @@ The core model is a custom **Transformer encoder** designed for sequence regress
 **Example Log**
 
 > Epoch 01 | Train MAE: 7.876 | Val MAE: 6.439 | LR: 5.20e-05
+
 > saved checkpoints/fantasy_transformer_best.pt (best_val=6.439)
+
 > Epoch 02 | Train MAE: 5.537 | Val MAE: 4.975 | LR: 1.04e-04
+
 > saved checkpoints/fantasy_transformer_best.pt (best_val=4.975)
+
 > Epoch 03 | Train MAE: 5.066 | Val MAE: 5.008 | LR: 1.55e-04
+
 > Epoch 04 | Train MAE: 5.037 | Val MAE: 4.983 | LR: 2.00e-04
+
 > Epoch 05 | Train MAE: 5.014 | Val MAE: 4.979 | LR: 1.91e-04
+
 > Epoch 06 | Train MAE: 4.990 | Val MAE: 4.966 | LR: 1.68e-04
+
 > saved checkpoints/fantasy_transformer_best.pt (best_val=4.966)
+
 > Epoch 07 | Train MAE: 4.969 | Val MAE: 4.942 | LR: 1.35e-04
+
 > saved checkpoints/fantasy_transformer_best.pt (best_val=4.942)
+
 > Epoch 08 | Train MAE: 4.938 | Val MAE: 4.948 | LR: 9.76e-05
 
 **Interpretation:**
