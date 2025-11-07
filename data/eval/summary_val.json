@@ -1,0 +1,14 @@
+{
+  "split": "val",
+  "N": 4681,
+  "MAE": 4.941540718078613,
+  "RMSE": 6.78447200331533,
+  "Spearman": 0.5876494895708351,
+  "LineupSpearmanMean": 0.5292304508418239,
+  "outputs": {
+    "rows": "data/eval/rows_val.parquet",
+    "calibration": "data/eval/calibration_val.csv",
+    "by_position": "data/eval/bypos_val.csv",
+    "comparisons": "data/eval/comparisons_val.csv"
+  }
+}
