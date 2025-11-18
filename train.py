@@ -15,7 +15,6 @@ META_PATH = DATA_DIR / "feature_meta.json"
 CKPT_DIR = Path("checkpoints"); CKPT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# Repro (optional)
 def set_seed(seed=42):
     import random, os
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
@@ -23,13 +22,12 @@ def set_seed(seed=42):
         torch.cuda.manual_seed_all(seed)
 set_seed(42)
 
-# Dataset
 class PlayerSeqDataset(Dataset):
     def __init__(self, npz_path: Path, split: str):
         data = np.load(npz_path, allow_pickle=True)
-        self.X_num = data["X_num"]        # (N, T, F_num), standardized
-        self.X_cat = data["X_cat"]        # (N, T, F_cat)
-        self.X_mask= data["X_mask"]       # (N, T)
+        self.X_num = data["X_num"]
+        self.X_cat = data["X_cat"]
+        self.X_mask= data["X_mask"]
         self.y     = data["y"].astype(np.float32)
 
         tr = data["train_idx"].astype(bool)
@@ -52,7 +50,6 @@ class PlayerSeqDataset(Dataset):
             "y":     torch.tensor(self.y[j]).float(),
         }
 
-# Metrics
 def mae(pred, target):
     return (pred - target).abs().mean().item()
 
@@ -71,7 +68,6 @@ def evaluate(model, dl, device):
     return total_abs / m
 
 
-# Warmup + Cosine scheduler
 def make_warmup_cosine(optimizer, warmup_steps, total_steps, min_lr=1e-6):
     base_lrs = [g['lr'] for g in optimizer.param_groups]
     def lr_lambda(step):
@@ -83,7 +79,6 @@ def make_warmup_cosine(optimizer, warmup_steps, total_steps, min_lr=1e-6):
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
-# Train
 def main():
     feat = json.load(open(META_PATH))
     num_feats = len(feat["num_feats"])
@@ -124,8 +119,8 @@ def main():
         for batch in train_dl:
             x_num = batch["x_num"].to(device, non_blocking=True)
             x_cat = batch["x_cat"].to(device, non_blocking=True)
-            mask = batch["mask"].to(device, non_blocking=True)
-            y = batch["y"].to(device, non_blocking=True)
+            mask  = batch["mask"].to(device, non_blocking=True)
+            y     = batch["y"].to(device, non_blocking=True)
             y_clipped = torch.clamp(y, 0.0, 50.0)
 
             opt.zero_grad(set_to_none=True)
@@ -134,7 +129,6 @@ def main():
                 loss = loss_fn(yhat, y_clipped)
 
             scaler.scale(loss).backward()
-            # gradient clipping
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(opt)
@@ -150,7 +144,6 @@ def main():
         val_mae = evaluate(model, val_dl, device)
         print(f"Epoch {ep:02d} | Train MAE: {tr_mae:.3f} | Val MAE: {val_mae:.3f} | LR: {sched.get_last_lr()[0]:.2e}")
 
-        # Save best
         if val_mae < best_val:
             best_val = val_mae
             ckpt_path = CKPT_DIR / "fantasy_transformer_best.pt"
