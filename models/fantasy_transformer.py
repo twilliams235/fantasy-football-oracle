@@ -50,7 +50,7 @@ class FantasyTransformer(nn.Module):
             nn.Linear(d_model, 1),
         )
 
-    def forward(self, x_num: torch.Tensor, x_cat: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_num: torch.Tensor, x_cat: torch.Tensor, mask: torch.Tensor):
         B, T, _ = x_num.shape
         device = x_num.device
 

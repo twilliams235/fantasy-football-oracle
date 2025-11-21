@@ -54,11 +54,9 @@ def main():
     overall_rmse_yahoo = rmse(y_true, y_yahoo)
     overall_rmse_model = rmse(y_true, y_model)
 
-    print("=== Overall accuracy (all CSV rows) ===")
+    print("=== Overall accuracy ===")
     print(f"Yahoo MAE:  {overall_mae_yahoo:.3f}")
     print(f"Model MAE:  {overall_mae_model:.3f}")
-    print(f"Yahoo RMSE: {overall_rmse_yahoo:.3f}")
-    print(f"Model RMSE: {overall_rmse_model:.3f}")
     print()
 
     rows = []
