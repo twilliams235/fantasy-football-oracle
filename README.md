@@ -59,9 +59,9 @@ This script writes:
 
 train.py loads the NPZ, creates train/val datasets, and trains the FantasyTransformer.
 
-#!/bin/bash
+```console
 python train.py
-
+```
 
 Key details (from train.py):
 
