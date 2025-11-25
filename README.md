@@ -44,8 +44,9 @@ This step:
 
 - python make_player_sequences.py
 
-#!/bin/bash
+```console
 python make_player_sequences.py
+```
 
 This script writes:
 
