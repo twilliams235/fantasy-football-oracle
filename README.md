@@ -1,143 +1,101 @@
 # Fantasy Football Score Predictions w/ a Transformer
 
-## Preprocessed Data
+This repository contains a full pipeline for predicting **next-week fantasy football PPR scores** using a **Transformer-based sequence model** trained on multi-season NFL data.
 
-After running the preprocessing pipeline (make_player_sequences.py), the following artifacts are generated in data/processed/:
+The project:
 
-## meta.parquet
+- Uses [`nflreadpy`](https://github.com/nflverse/nflreadr) to pull **player-level weekly stats, rosters, and team context** from 2017–2025.
+- Builds **fixed-length sequences** of up to 10 past games per player with lagged stats, moving averages, and opponent/usage context.
+- Trains a **Transformer encoder** in PyTorch to predict **next-week PPR fantasy points**.
+- Evaluates performance on the **2025 season** and compares the model against **Yahoo’s fantasy projections** for selected players.
 
-A lightweight, human-readable index of training samples.
-Each row corresponds to one player-week sample (i.e., the state of a player up through Week k, with the label = fantasy points scored in Week k+1).
 
-**Columns:**
+## Features
 
-- player_id — stable nflverse player identifier
+- **End-to-end data pipeline**:
+  - Load multi-year NFL stats via `nflreadpy`
+  - Engineer features (lags, MA3/MA5, defense-vs-position, team pass rate)
+  - Build [N, T, F] sequences (& masks) for Transformer input
+- **Sequence model**:
+  - Transformer encoder over 10-week histories
+  - Numeric + categorical feature fusion
+  - Position and team context included
+- **Evaluation**:
+  - Train on 2017–2024, validate on 2025
+  - Compute MAE vs. actual PPR
+  - Compare model vs. Yahoo projections on a curated set of players
+  - Generate plots (error histograms, per-player MAE, etc.)
 
-- player_name — display name (may be abbreviated, e.g. C.McCaffrey)
+## Usage
 
-- position — fantasy-relevant position (QB, RB, WR, TE)
+**1. Build Player Sequences**
+This step:
+- Loads weekly stats and rosters with nflreadpy
 
-- team — player’s team during that week (abbreviation)
+- Filters to QB/RB/WR/TE
 
-- season — NFL season year
+- Computes PPR scoring (if not already present)
 
-- week — NFL week number (1–22 including playoffs if available)
+- Adds lag-1, MA3, MA5 features
 
-- y_next_ppr — label = PPR fantasy points scored by the player in the following week
+- Builds 10-week sequences per player
 
-**Notes:**
+- Splits into train (2017–2024) and val (2025)
 
-- meta.parquet does not contain input features like targets/carries directly.
+- python make_player_sequences.py
 
-- It’s mainly for filtering/searching samples by player/team/week and joining predictions back to human-readable IDs.
+#!/bin/bash
+python make_player_sequences.py
 
-### player_sequences_npz.npz
+This script writes:
 
-A compressed NumPy archive containing the actual model inputs and labels.
-This is what you load for training or evaluation.
+- data/processed/player_sequences_npz.npz
 
-**Arrays inside:**
+- data/processed/meta.parquet
 
-- X_num — numeric features; shape [N, T, F_num]
+- data/processed/feature_meta.json
 
-    - N = number of samples
+**2. Train the Transformer**
 
-    - T = sequence length (default = 10 weeks)
+train.py loads the NPZ, creates train/val datasets, and trains the FantasyTransformer.
 
-    - F_num = number of numeric features (rolling/lagged stats, team context, matchup stats, etc.)
+#!/bin/bash
+python train.py
 
-    - Values are standardized (z-scored) using global mean/std stored in feature_meta.json.
 
-- X_cat — categorical features; shape [N, T, F_cat]
+Key details (from train.py):
 
-    - Integer IDs for team, opponent, position (vocabularies also stored in feature_meta.json).
+- Train: samples where season < 2025
 
-- X_mask — attention mask; shape [N, T]
+- Val: samples where season == 2025
 
-    - 1 = valid timestep, 0 = padding (for players with <T weeks of history).
+- Optimizer: AdamW (lr = 2e-4, weight decay 1e-4)
 
-- y — regression targets; shape [N]
+- Loss: Smooth L1 (Huber)
 
-    - PPR fantasy points scored in the following week.
+- LR schedule: warmup + cosine decay
 
-- train_idx / val_idx — boolean masks of length N
+- Gradient clipping: max_norm=1.0
 
-    - Used to split samples into training vs. validation (by season).
+- Mixed precision via torch.cuda.amp when GPU is available
 
-### Companion file: feature_meta.json
+The script saves the best checkpoint to: checkpoints/fantasy_transformer_best.pt based on validation MAE.
 
-Stores metadata describing the NPZ arrays:
+## Model Architecture (High-level)
+The model is defined in models/fantasy_transformer.py:
 
-- num_feats — ordered list of numeric feature names (e.g., receptions_lag1, receptions_ma3, carries_ma5, pass_rate, def_fp_allowed_WR, etc.).
+- Projects numeric features (x_num) to d_model = 192
 
-- cat_feats — names of categorical feature slots (team_id, opp_id, pos_id).
+- Embeds categorical features (team_id, opp_id, pos_id) into d_model each
 
-- team_index, opp_index, pos_index — dictionaries mapping team/opponent/position strings integer IDs.
+- Concatenates numeric + all categorical embeddings per timestep and fuses them via a linear layer
 
-- num_mu, num_sd — arrays of means/stds used to z-score numeric features.
+- Adds learned positional encodings across sequence length
 
-## Model
+- Prepends a learnable [CLS] token
 
-The core model is a custom **Transformer encoder** designed for sequence regression:
+- Passes sequence through a Transformer encoder:
 
-- **Inputs**
-  - Numeric features (`X_num`) projected into `d_model` space
-  - Categorical features (`X_cat`) embedded separately (team, opponent, position), then concatenated with numeric projection and fused
-  - Optional learned positional embeddings (sequence length ≤ 512)
-  - Attention mask (`X_mask`) to ignore padded timesteps
+  - num_layers = 3, nhead = 4, feed-forward dim ff_mult * d_model
 
-- **Architecture**
-  - Projection + embedding fusion → Transformer encoder stack
-  - Prepend a learned `[CLS]` token to every sequence
-  - CLS-pooled output represents the entire sequence
-  - Position-aware conditioning: the player’s position (RB/WR/TE/QB) at the last valid timestep is embedded and concatenated with CLS before regression
-  - Regression head: LayerNorm → Linear → GELU → Dropout → Linear → scalar PPR prediction
-
-- **Config (default)**
-  - `d_model = 192`
-  - `nhead = 4`
-  - `num_layers = 3`
-  - `ff_mult = 4` (feedforward dim = 4 × d_model)
-  - `dropout = 0.1`
-  - `activation = GELU`
-
-## Training
-
-- **Loss:** Mean Absolute Error (MAE) between predicted and true next-week PPR
-- **Optimizer:** AdamW
-- **Scheduler:** configurable cosine annealing
-- **Batching:** mini-batches drawn from `train_idx`/`val_idx` with masks applied
-- **Checkpoints:** best model weights saved to `checkpoints/fantasy_transformer_best.pt` based on validation MAE
-- **Validation split:** controlled via `train_idx` / `val_idx` masks (season-based split)
-
-**Example Log**
-
-> Epoch 01 | Train MAE: 7.876 | Val MAE: 6.439 | LR: 5.20e-05
-
-> saved checkpoints/fantasy_transformer_best.pt (best_val=6.439)
-
-> Epoch 02 | Train MAE: 5.537 | Val MAE: 4.975 | LR: 1.04e-04
-
-> saved checkpoints/fantasy_transformer_best.pt (best_val=4.975)
-
-> Epoch 03 | Train MAE: 5.066 | Val MAE: 5.008 | LR: 1.55e-04
-
-> Epoch 04 | Train MAE: 5.037 | Val MAE: 4.983 | LR: 2.00e-04
-
-> Epoch 05 | Train MAE: 5.014 | Val MAE: 4.979 | LR: 1.91e-04
-
-> Epoch 06 | Train MAE: 4.990 | Val MAE: 4.966 | LR: 1.68e-04
-
-> saved checkpoints/fantasy_transformer_best.pt (best_val=4.966)
-
-> Epoch 07 | Train MAE: 4.969 | Val MAE: 4.942 | LR: 1.35e-04
-
-> saved checkpoints/fantasy_transformer_best.pt (best_val=4.942)
-
-> Epoch 08 | Train MAE: 4.938 | Val MAE: 4.948 | LR: 9.76e-05
-
-**Interpretation:**
-
-- The model quickly learns to reduce validation MAE into the ~5 PPR point range.
-
-- CLS pooling with position-aware conditioning stabilizes performance and helps generalization across RB/WR/TE/QB.
+- Uses [CLS] (optionally concatenated with the last position embedding) as input to a small MLP head that outputs a scalar PPR prediction
