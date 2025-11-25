@@ -5,30 +5,35 @@ from typing import List
 class FantasyTransformer(nn.Module):
     def __init__(
         self,
-        num_feats: int,
+        num_feats: int,              # number of numeric features per timestep
         cat_vocab_sizes: List[int],
-        d_model: int = 192,
-        nhead: int = 4,
-        num_layers: int = 3,
+        d_model: int = 192,          # transformer hidden dimension
+        nhead: int = 4,              # number of attention heads
+        num_layers: int = 3,         # number of encoder layers
         ff_mult: int = 4,
         dropout: float = 0.1,
         use_pos_encoding: bool = True,
     ):
         super().__init__()
+
         self.num_feats = num_feats
         self.d_model = d_model
         self.use_pos = use_pos_encoding
         self.num_cat = len(cat_vocab_sizes)
 
+        # Project numeric features into the model dimension
         self.num_proj = nn.Linear(num_feats, d_model)
 
+        # Embeddings for categorical features (team_id, opp_id, pos_id)
         self.embs = nn.ModuleList([nn.Embedding(v, d_model) for v in cat_vocab_sizes])
 
+        # Fuse numeric + all categorical embeddings into a single d_model vector
         self.fuse = nn.Linear(d_model * (1 + self.num_cat), d_model)
 
         if self.use_pos:
             self.pos_enc = nn.Embedding(512, d_model)
 
+        # Learnable [CLS] token representing the entire sequence
         self.cls = nn.Parameter(torch.randn(1, 1, d_model))
 
         enc_layer = nn.TransformerEncoderLayer(
@@ -47,10 +52,15 @@ class FantasyTransformer(nn.Module):
             nn.Linear(head_in, d_model),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_model, 1),
+            nn.Linear(d_model, 1),  # Output: next-week fantasy prediction
         )
 
     def forward(self, x_num: torch.Tensor, x_cat: torch.Tensor, mask: torch.Tensor):
+        """
+        x_num: (B, T, num_feats)
+        x_cat: (B, T, num_cat) categorical IDs per timestep
+        mask:  (B, T) with 1 for real timesteps and 0 for padding
+        """
         B, T, _ = x_num.shape
         device = x_num.device
 
@@ -59,6 +69,8 @@ class FantasyTransformer(nn.Module):
         cat_embs = []
         for i, emb in enumerate(self.embs):
             cat_embs.append(emb(x_cat[:, :, i]))
+
+        # Concatenate numeric + categorical embeddings
         h = torch.cat([h_num] + cat_embs, dim=-1)
 
         h = self.fuse(h)
@@ -72,8 +84,10 @@ class FantasyTransformer(nn.Module):
 
         key_padding = (mask == 0)
         key_padding = torch.cat(
-            [torch.zeros(B, 1, dtype=torch.bool, device=device), key_padding], dim=1
+            [torch.zeros(B, 1, dtype=torch.bool, device=device), key_padding],
+            dim=1
         )
+
         z = self.encoder(h_in, src_key_padding_mask=key_padding)
 
         cls_vec = z[:, 0, :]
@@ -82,6 +96,7 @@ class FantasyTransformer(nn.Module):
             last_idx = mask.sum(dim=1).long() - 1
             last_idx = torch.clamp(last_idx, min=0)
 
+            # Position embedding for the final timestep
             pos_ids_last = x_cat[torch.arange(B, device=device), last_idx, 2]
             pos_emb_last = self.embs[2](pos_ids_last)
 
@@ -89,5 +104,6 @@ class FantasyTransformer(nn.Module):
         else:
             head_in = cls_vec
 
+        # Final prediction
         yhat = self.head(head_in).squeeze(-1)
         return yhat
